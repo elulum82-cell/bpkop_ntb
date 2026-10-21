@@ -10,6 +10,7 @@ import re
 import smtplib
 from datetime import date, datetime
 from email.message import EmailMessage
+from urllib.parse import quote
 
 import streamlit as st
 
@@ -122,12 +123,23 @@ CONTOH_OPT = [
 # ---------------------------------------------------------------- util
 def cfg(key, default=None):
     """Baca konfigurasi dari st.secrets, lalu environment variable."""
+    val = None
     try:
         if key in st.secrets:
-            return st.secrets[key]
+            val = st.secrets[key]
     except Exception:
         pass
-    return os.environ.get(key, default)
+    if val in (None, ""):
+        val = os.environ.get(key)
+    if isinstance(val, str):
+        val = val.strip()
+        if not val or val.lower().startswith(("isi", "xxxx", "alamat-pengirim", "your")):
+            val = None  # masih placeholder
+    return default if val in (None, "") else val
+
+
+def smtp_ready():
+    return bool(cfg("SMTP_USER") and cfg("SMTP_PASSWORD"))
 
 
 def S(key, default=""):
@@ -235,10 +247,10 @@ def send_email(summary, csv_text, cc_participant):
     host = cfg("SMTP_HOST", "smtp.gmail.com")
     port = int(cfg("SMTP_PORT", 465))
     user = cfg("SMTP_USER")
-    pwd = cfg("SMTP_PASSWORD")
+    pwd = (cfg("SMTP_PASSWORD") or "").replace(" ", "")
     to = cfg("EMAIL_TO", DEFAULT_RECIPIENT)
     if not user or not pwd:
-        raise RuntimeError("SMTP_USER / SMTP_PASSWORD belum dikonfigurasi (lihat README.md).")
+        raise RuntimeError("Pengiriman email otomatis belum diaktifkan oleh penyelenggara.")
     msg = EmailMessage()
     msg["Subject"] = f"[IDP 2026] {S('nama') or S('email')}"
     msg["From"] = user
@@ -259,6 +271,24 @@ def send_email(summary, csv_text, cc_participant):
             s.starttls()
             s.login(user, pwd)
             s.send_message(msg)
+
+
+def mailto_link(summary):
+    """Tautan 'buka aplikasi email' berisi ringkasan (dipotong karena batas panjang URL)."""
+    body = summary if len(summary) <= 1500 else summary[:1500] + "\n\n[... dipotong, lihat lampiran .txt ...]"
+    body += "\n\n(Mohon lampirkan file IDP2026.txt dan IDP2026.csv yang diunduh dari aplikasi.)"
+    return (f"mailto:{cfg('EMAIL_TO', DEFAULT_RECIPIENT)}?subject="
+            + quote(f"[IDP 2026] {S('nama') or S('email')}") + "&body=" + quote(body))
+
+
+SETUP_HELP = """
+**Untuk penyelenggara: aktifkan pengiriman otomatis (sekali saja)**
+1. Buka akun Gmail pengirim, aktifkan **Verifikasi 2 langkah**.
+2. Buat **App Password** di https://myaccount.google.com/apppasswords (16 karakter).
+3. Buka file `.streamlit/secrets.toml` di folder aplikasi, isi `SMTP_USER` (email pengirim) dan
+   `SMTP_PASSWORD` (App Password), simpan.
+4. Jalankan ulang aplikasi. Di Streamlit Cloud: **Settings > Secrets**, tempel isi yang sama.
+"""
 
 
 # ---------------------------------------------------------------- UI
@@ -470,25 +500,39 @@ with tabs[7]:
     st.subheader("Kirim IDP")
     st.write(f"Jawaban akan dikirim ke **{cfg('EMAIL_TO', DEFAULT_RECIPIENT)}**.")
     cc = st.checkbox("Kirim salinan ke email saya", value=True)
+    if not smtp_ready():
+        st.warning("Pengiriman email otomatis belum diaktifkan. Anda tetap bisa mengirim lewat aplikasi email "
+                   "atau mengunduh hasilnya setelah menekan tombol di bawah.")
+        with st.expander("Untuk penyelenggara: cara mengaktifkan"):
+            st.markdown(SETUP_HELP)
     if st.button("Periksa & kirim ke email", type="primary"):
         errors = validate()
         if errors:
+            st.session_state.pop("_last", None)
             st.error("Mohon lengkapi dulu:")
             for e in errors:
                 st.write(f"- {e}")
         else:
             summary, csv_text = build_summary(), build_csv()
-            try:
-                with st.spinner("Mengirim email..."):
-                    send_email(summary, csv_text, cc)
-                st.success("IDP berhasil dikirim.")
-                st.session_state["_last"] = (summary, csv_text)
-            except Exception as ex:  # tampilkan alasan, jawaban tetap bisa diunduh
-                st.error(f"Email gagal terkirim: {ex}")
-                st.session_state["_last"] = (summary, csv_text)
-                st.warning("Unduh hasilnya di bawah ini dan kirim manual.")
+            st.session_state["_last"] = (summary, csv_text)
+            if not smtp_ready():
+                st.info("Isian Anda sudah lengkap. Kirim lewat tombol **Buka aplikasi email** di bawah, "
+                        "lalu lampirkan file yang diunduh.")
+            else:
+                try:
+                    with st.spinner("Mengirim email..."):
+                        send_email(summary, csv_text, cc)
+                    st.success("IDP berhasil dikirim.")
+                except smtplib.SMTPAuthenticationError:
+                    st.error("Login email pengirim ditolak. Pastikan memakai App Password Gmail (bukan password "
+                             "biasa) dan verifikasi 2 langkah aktif.")
+                    st.warning("Gunakan tombol di bawah untuk mengirim manual.")
+                except Exception as ex:
+                    st.error(f"Email gagal terkirim: {ex}")
+                    st.warning("Gunakan tombol di bawah untuk mengirim manual.")
     if "_last" in st.session_state:
         summary, csv_text = st.session_state["_last"]
+        st.link_button("Buka aplikasi email (alternatif)", mailto_link(summary))
         c1, c2 = st.columns(2)
         c1.download_button("Unduh ringkasan (.txt)", summary, file_name="IDP2026.txt", mime="text/plain")
         c2.download_button("Unduh data (.csv)", csv_text, file_name="IDP2026.csv", mime="text/csv")
