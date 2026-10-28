@@ -5,12 +5,14 @@ Kirim email membutuhkan konfigurasi SMTP (lihat README.md).
 """
 import csv
 import io
+import json
 import os
 import re
 import smtplib
 from datetime import date, datetime
 from email.message import EmailMessage
-from urllib.parse import quote
+import urllib.request
+from urllib.parse import quote, urlencode
 
 import streamlit as st
 
@@ -72,6 +74,18 @@ SARANA = ["Self development (baca buku, challenge pribadi)", "Training/pelatihan
 N_ROWS = 5
 MIN_ROWS = 2
 
+TAHUN = [2026, 2027, 2028, 2029, 2030]
+KELAS = ["L3", "L4", "L5"]
+PEKERJAAN = ["ASN", "BUMN/BUMD", "Lembaga", "Swasta", "Wirausaha", "Pelajar/Mahasiswa", "Lainnya"]
+KABKOTA = ["Kota Mataram", "Kab. Lombok Barat", "Kab. Lombok Utara", "Kab. Lombok Tengah", "Kab. Lombok Timur",
+           "Kab. Sumbawa Barat", "Kab. Sumbawa", "Kab. Dompu", "Kab. Bima", "Kota Bima"]
+N_AKSI = 4
+CONTOH_AKSI = [
+    ("Mengikuti pelatihan kepemimpinan (sebut jenisnya, mis. PKN Tingkat III)", "Maret - Mei 2026"),
+    ("Mengikuti seleksi terbuka jabatan pimpinan tinggi pratama", "Agustus 2026"),
+    ("Membentuk jejaring dengan komunitas dan lembaga mitra", "Sepanjang 2026, 1x per bulan"),
+    ("Menyiapkan dokumen/portofolio untuk kenaikan pangkat", "Oktober - Desember 2026"),
+]
 CONTOH_PERAN = {
     "I0": "Membina 5 calon pengurus lewat mentoring bulanan; 2 di antaranya kini menjadi ketua divisi.",
     "I1": "Jumlah anggota naik dari 30 menjadi 55 orang; 10 anggota baru sudah mengikuti pelatihan dasar.",
@@ -138,6 +152,26 @@ def cfg(key, default=None):
     return default if val in (None, "") else val
 
 
+KOMIT_TEXT = "Ya, saya berkomitmen menjalankan rencana aksi sesuai linimasa"
+
+
+def gform_entries():
+    ent = cfg("GFORM_ENTRIES") or {}
+    if isinstance(ent, str):
+        try:
+            ent = json.loads(ent)
+        except ValueError:
+            ent = {}
+    try:
+        return {k: v for k, v in dict(ent).items() if v}
+    except (TypeError, ValueError):
+        return {}
+
+
+def gform_ready():
+    return bool(cfg("GFORM_URL") and gform_entries())
+
+
 def smtp_ready():
     return bool(cfg("SMTP_USER") and cfg("SMTP_PASSWORD"))
 
@@ -168,8 +202,6 @@ def validate():
     ly = S("lahir", 0)
     if not (1930 < int(ly or 0) < 2015):
         err.append("Tahun lahir belum valid.")
-    if not S("prov"):
-        err.append("Asal provinsi belum dipilih.")
     if not st.session_state.get("sektor"):
         err.append("Sektor pekerjaan belum dipilih.")
     for code, (nama, _, items) in PERAN.items():
@@ -188,15 +220,23 @@ def validate():
             err.append(f"Rencana optimalisasi peran No {i + 1} belum lengkap.")
     if not S("lalu"):
         err.append("Kompetensi yang dikembangkan 1 tahun ke belakang belum diisi.")
+    for k, label in [("nama", "Nama lengkap (beserta gelar)"), ("kelas", "Kelas"), ("pekerjaan", "Pekerjaan"), ("jabatan", "Jabatan"),
+                     ("pangkat", "Pangkat/Golongan (isi 0 jika non-ASN)"), ("tujuan", "Tujuan/Target utama"),
+                     ("a0_r", "Rencana Aksi 1"), ("a0_w", "Waktu Pelaksanaan 1"), ("mentor", "Nama mentor")]:
+        if not S(k):
+            err.append(f"{label} belum diisi.")
+    if not st.session_state.get("komit"):
+        err.append("Pernyataan komitmen (tab 5) belum dicentang.")
     return err
 
 
 # ---------------------------------------------------------------- ringkasan
 def build_summary():
     L = ["INDIVIDUAL DEVELOPMENT PLAN 2026", f"Tanggal pengisian: {fmt_date(st.session_state.get('tgl'))}",
-         f"Nama: {S('nama') or '-'}", f"Email: {S('email')}", f"Tahun lahir: {S('lahir')}",
-         f"Asal: {', '.join(x for x in [S('kota'), S('prov')] if x)}",
-         f"Sektor: {'; '.join(st.session_state.get('sektor', []))}", f"Pekerjaan/instansi: {S('kerja') or '-'}"]
+         f"Tahun IDP: {S('tahun')}", f"Nama lengkap: {S('nama') or '-'}", f"Kelas: {S('kelas')}",
+         f"Pekerjaan: {S('pekerjaan')}", f"Jabatan: {S('jabatan')}", f"Pangkat/Golongan: {S('pangkat')}", f"Email: {S('email')}", f"Tahun lahir: {S('lahir')}",
+         f"Kabupaten/Kota: {S('kabkota') or '-'}",
+         f"Sektor: {'; '.join(st.session_state.get('sektor', []))}", f"Instansi/tempat bekerja: {S('kerja') or '-'}"]
     for code, (nama, _, items) in PERAN.items():
         L.append(f"\n== 1. REFLEKSI PERAN: {nama.upper()} ==")
         for i, (title, opts) in enumerate(items):
@@ -218,13 +258,26 @@ def build_summary():
         if S(f"o{i}_r"):
             L += [f"No {i + 1}", f"  Rencana peran : {S(f'o{i}_r')}", f"  Indikator     : {S(f'o{i}_i') or '-'}",
                   f"  Target        : {fmt_date(st.session_state.get(f'o{i}_d'))}"]
+    L += ["\n== 5. TUJUAN UTAMA & RENCANA AKSI ==", f"Tujuan/Target utama: {S('tujuan')}",
+          f"Kompetensi/keahlian yang diperlukan: {S('kompet') or '-'}"]
+    for i in range(N_AKSI):
+        if S(f"a{i}_r"):
+            L.append(f"Aksi {i + 1}: {S(f'a{i}_r')} | Waktu: {S(f'a{i}_w') or '-'}")
+    L += ["Komitmen: peserta berkomitmen menjalankan rencana aksi sesuai linimasa.",
+          f"Nama mentor: {S('mentor')}"]
     return "\n".join(L)
 
 
 def build_csv():
     row = {"waktu_kirim": datetime.now().isoformat(timespec="seconds"), "nama": S("nama"), "email": S("email"),
-           "tahun_lahir": S("lahir"), "provinsi": S("prov"), "kota": S("kota"),
-           "sektor": "; ".join(st.session_state.get("sektor", [])), "instansi": S("kerja")}
+           "tahun_lahir": S("lahir"),
+           "sektor": "; ".join(st.session_state.get("sektor", [])), "instansi": S("kerja"),
+           "tahun_idp": S("tahun"), "kelas": S("kelas"), "pekerjaan": S("pekerjaan"), "jabatan": S("jabatan"),
+           "pangkat_golongan": S("pangkat"), "tujuan_utama": S("tujuan"), "kompetensi_diperlukan": S("kompet"),
+           "kabupaten_kota": S("kabkota"), "nama_mentor": S("mentor"), "komitmen": "ya" if st.session_state.get("komit") else "tidak"}
+    for i in range(N_AKSI):
+        row[f"aksi{i + 1}_rencana"] = S(f"a{i}_r")
+        row[f"aksi{i + 1}_waktu"] = S(f"a{i}_w")
     for code, (nama, _, items) in PERAN.items():
         for i, (title, _) in enumerate(items):
             row[f"{code}{i + 1}_{title}"] = st.session_state.get(f"{code}{i}")
@@ -240,6 +293,57 @@ def build_csv():
     w.writeheader()
     w.writerow(row)
     return "\ufeff" + buf.getvalue()
+
+
+# ---------------------------------------------------------------- Google Form
+def gform_payload():
+    """Semua isian -> dict {kunci: nilai}; kunci sama dengan yang dibuat skrip Apps Script."""
+    ss, out = st.session_state, {}
+
+    def put(k, v):
+        if v not in (None, "", [], "-"):
+            out[k] = v
+
+    put("tgl", fmt_date(ss.get("tgl")))
+    put("tahun", str(S("tahun")))
+    for k in ("nama", "kelas", "pekerjaan", "jabatan", "pangkat", "email", "kabkota", "kerja", "tujuan", "kompet",
+              "lalu", "mentor"):
+        put(k, S(k))
+    put("lahir", str(int(S("lahir"))) if S("lahir") else "")
+    put("sektor", list(ss.get("sektor", [])))
+    for code, (_, _, items) in PERAN.items():
+        for i, (_, opts) in enumerate(items):
+            v = ss.get(f"{code}{i}")
+            if v:
+                put(f"r_{code}{i}", f"{v}. {opts[v - 1]}")
+            put(f"d_{code}{i}", S(f"{code}{i}_d"))
+    for i in range(N_ROWS):
+        for k in ("g%d_t", "g%d_u", "g%d_w", "p%d_t", "p%d_s", "p%d_i", "o%d_r", "o%d_i"):
+            put(k % i, S(k % i))
+        put(f"o{i}_d", fmt_date(ss.get(f"o{i}_d")))
+    for i in range(N_AKSI):
+        put(f"a{i}_r", S(f"a{i}_r"))
+        put(f"a{i}_w", S(f"a{i}_w"))
+    if ss.get("komit"):
+        put("komit", [KOMIT_TEXT])
+    return out
+
+
+def submit_gform(payload):
+    """Kirim jawaban ke Google Form lewat endpoint formResponse."""
+    url, entries = cfg("GFORM_URL"), gform_entries()
+    pairs = []
+    for k, v in payload.items():
+        if k in entries:
+            for item in (v if isinstance(v, list) else [v]):
+                pairs.append((entries[k], item))
+    pairs += [("fvv", "1"), ("pageHistory", "0")]
+    req = urllib.request.Request(url, data=urlencode(pairs).encode("utf-8"), method="POST",
+                                 headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        if r.status != 200:
+            raise RuntimeError(f"Google Form menjawab status {r.status}")
+    return len(pairs) - 2
 
 
 # ---------------------------------------------------------------- email
@@ -273,21 +377,37 @@ def send_email(summary, csv_text, cc_participant):
             s.send_message(msg)
 
 
-def mailto_link(summary):
-    """Tautan 'buka aplikasi email' berisi ringkasan (dipotong karena batas panjang URL)."""
-    body = summary if len(summary) <= 1500 else summary[:1500] + "\n\n[... dipotong, lihat lampiran .txt ...]"
-    body += "\n\n(Mohon lampirkan file IDP2026.txt dan IDP2026.csv yang diunduh dari aplikasi.)"
-    return (f"mailto:{cfg('EMAIL_TO', DEFAULT_RECIPIENT)}?subject="
-            + quote(f"[IDP 2026] {S('nama') or S('email')}") + "&body=" + quote(body))
+def compose_links(summary):
+    """Tautan penulisan email berisi ringkasan: Gmail web, Outlook web, dan aplikasi email bawaan (mailto)."""
+    to = cfg("EMAIL_TO", DEFAULT_RECIPIENT)
+    subj = f"[IDP 2026] {S('nama') or S('email')}"
+    note = "\n\n(Mohon lampirkan file IDP2026.txt dan IDP2026.csv yang diunduh dari aplikasi.)"
+
+    def body(limit):
+        t = summary if len(summary) <= limit else summary[:limit] + "\n\n[... dipotong, lihat lampiran .txt ...]"
+        return t + note
+
+    web, short = quote(body(2800)), quote(body(1200))
+    return {
+        "to": to, "subject": subj,
+        "gmail": f"https://mail.google.com/mail/?view=cm&fs=1&to={quote(to)}&su={quote(subj)}&body={web}",
+        "outlook": f"https://outlook.live.com/mail/0/deeplink/compose?to={quote(to)}&subject={quote(subj)}&body={web}",
+        "mailto": f"mailto:{to}?subject={quote(subj)}&body={short}",
+    }
 
 
 SETUP_HELP = """
-**Untuk penyelenggara: aktifkan pengiriman otomatis (sekali saja)**
-1. Buka akun Gmail pengirim, aktifkan **Verifikasi 2 langkah**.
-2. Buat **App Password** di https://myaccount.google.com/apppasswords (16 karakter).
-3. Buka file `.streamlit/secrets.toml` di folder aplikasi, isi `SMTP_USER` (email pengirim) dan
-   `SMTP_PASSWORD` (App Password), simpan.
-4. Jalankan ulang aplikasi. Di Streamlit Cloud: **Settings > Secrets**, tempel isi yang sama.
+**Untuk penyelenggara (sekali saja)**
+
+*A. Kirim ke Google Form*
+1. Buka https://script.google.com, buat proyek baru, tempel isi file `buat_google_form.gs`, lalu jalankan fungsi `buatFormIDP`
+   (setujui izin akses).
+2. Buka **Execution log**: salin blok `GFORM_URL` dan `[GFORM_ENTRIES]` ke `.streamlit/secrets.toml`.
+3. Jalankan ulang aplikasi. Di Streamlit Cloud: **Settings > Secrets**.
+
+*B. Kirim ke email (opsional)*
+1. Aktifkan **Verifikasi 2 langkah** di Gmail pengirim, buat **App Password** di https://myaccount.google.com/apppasswords.
+2. Isi `SMTP_USER` dan `SMTP_PASSWORD` di `secrets.toml`.
 """
 
 
@@ -344,12 +464,19 @@ header[data-testid="stHeader"] { background: transparent; }
   .rule { width: 200px; } }
 
 /* ---------- KOMPONEN ---------- */
-.stTabs [data-baseweb="tab-list"] { gap: 8px; padding: 4px 2px 10px; }
-.stTabs [data-baseweb="tab"] { height: auto; padding: 8px 16px; border-radius: 999px; background: rgba(15,107,104,.10);
-  font-weight: 600; transition: all .2s; white-space: nowrap; }
-.stTabs [data-baseweb="tab"]:hover { background: rgba(15,107,104,.2); transform: translateY(-1px); }
-.stTabs [aria-selected="true"] { background: linear-gradient(135deg, #0f6b68, #2f8f94); color: #fff !important;
-  box-shadow: 0 4px 12px rgba(15,107,104,.35); }
+.stTabs [data-baseweb="tab-list"] { gap: 10px; padding: 10px 8px 14px; position: sticky; top: 3.4rem; z-index: 50;
+  background: linear-gradient(180deg, rgba(244,250,249,.97) 70%, rgba(244,250,249,0)); overflow-x: auto;
+  scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #58a6ad transparent; }
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { height: 5px; }
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb { background: #58a6ad; border-radius: 9px; }
+.stTabs [data-baseweb="tab"] { height: auto; padding: 10px 18px; border-radius: 14px; background: #fff;
+  border: 1.5px solid rgba(15,107,104,.18); box-shadow: 0 2px 8px rgba(15,107,104,.08); font-weight: 600; font-size: .92rem;
+  white-space: nowrap; scroll-snap-align: center; transition: transform .2s, box-shadow .2s, background .2s, border-color .2s; }
+.stTabs [data-baseweb="tab"] p { font-size: .92rem; font-weight: 600; margin: 0; }
+.stTabs [data-baseweb="tab"]:hover { transform: translateY(-3px); border-color: #2f8f94; box-shadow: 0 8px 18px rgba(15,107,104,.22); }
+.stTabs [aria-selected="true"] { background: linear-gradient(135deg, #0f6b68, #2f8f94) !important; color: #fff !important;
+  border-color: transparent; transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15,107,104,.45); }
+.stTabs [aria-selected="true"] p { color: #fff !important; }
 .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
 .stTabs [data-baseweb="tab-panel"] { animation: fadein .5s ease; padding-top: 10px; }
 h2, h3 { color: #0f6b68; font-weight: 800 !important; }
@@ -372,7 +499,7 @@ def hero_html():
         return f'<span class="w">{chars}</span>'
 
     return (CSS + '<div class="hero"><div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>'
-            '<div class="kicker">Pengembangan Diri &amp; Peran</div>'
+            '<div class="kicker">Formulir IDP Prowil NTB</div>'
             f'<div class="title">{word("BPKOP", 0)}{word("NTB", 5)}</div><div class="rule"></div>'
             '<div class="subtitle">Individual Development Plan 2026</div>'
             '<div class="tag">Rencanakan pengembangan kompetensi dan optimalkan peran Anda dalam 1 tahun ke depan</div></div>')
@@ -381,7 +508,7 @@ def hero_html():
 def completeness():
     """Proporsi isian wajib yang sudah terisi (untuk progress bar)."""
     ss = st.session_state
-    checks = [bool(re.match(r"^\S+@\S+\.\S+$", S("email"))), bool(ss.get("lahir")), bool(ss.get("prov")), bool(ss.get("sektor")),
+    checks = [bool(re.match(r"^\S+@\S+\.\S+$", S("email"))), bool(ss.get("lahir")), bool(ss.get("sektor")),
               bool(S("lalu"))]
     for code, (_, _, items) in PERAN.items():
         for i in range(len(items)):
@@ -390,6 +517,8 @@ def completeness():
     for i in range(MIN_ROWS):
         checks += [bool(S(f"g{i}_t") and S(f"g{i}_u") and S(f"g{i}_w")), bool(S(f"p{i}_t") and S(f"p{i}_s") and S(f"p{i}_i")),
                    bool(S(f"o{i}_r") and S(f"o{i}_i") and ss.get(f"o{i}_d"))]
+    checks += [bool(S(k)) for k in ("nama", "kelas", "pekerjaan", "jabatan", "pangkat", "tujuan", "a0_r", "a0_w", "mentor")]
+    checks.append(bool(ss.get("komit")))
     return sum(checks) / len(checks)
 
 
@@ -397,8 +526,8 @@ st.markdown(hero_html(), unsafe_allow_html=True)
 _pct = completeness()
 st.progress(_pct, text=f"Kelengkapan isian wajib: {int(_pct * 100)}%")
 
-tabs = st.tabs(["Pengantar & Identitas", "1A Internal", "1B Keummatan", "1C Kenegaraan",
-                "2 Gap Kompetensi", "3 Pengembangan", "4 Optimalisasi", "Kirim"])
+tabs = st.tabs(["🏠 Identitas", "🏢 1A Internal", "🕌 1B Keummatan", "🏛️ 1C Kenegaraan",
+                "🎯 2 Gap Kompetensi", "📚 3 Pengembangan", "🚀 4 Optimalisasi", "🧭 5 Tujuan & Aksi", "✉️ Kirim"])
 
 with tabs[0]:
     st.subheader("Pengantar")
@@ -410,17 +539,22 @@ with tabs[0]:
             "muslim di Indonesia. Anda dapat mengembangkan format sendiri atau mengadaptasi format ini sesuai kebutuhan, "
             "atau memakai format IDP lain dari kantor/komunitas.")
     st.date_input("Tanggal pengisian", value=date.today(), key="tgl", format="DD/MM/YYYY")
-    st.text_input("Nama", key="nama", placeholder="Contoh: Ahmad Fauzi")
+    st.selectbox("Tahun rencana pengembangan (IDP) *", TAHUN, index=0, key="tahun")
+    st.text_input("Nama lengkap (beserta gelar) *", key="nama", placeholder="Contoh: Ahmad Fauzi, S.T., M.Si.")
+    st.selectbox("Kelas *", KELAS, index=None, placeholder="Pilih kelas (L3/L4/L5)", key="kelas")
+    st.selectbox("Pekerjaan *", PEKERJAAN, index=None, placeholder="-- Pilih pekerjaan --", key="pekerjaan")
+    st.text_input("Jabatan *", key="jabatan", placeholder="Contoh: Kepala Seksi Perencanaan / Staf Program / Pemilik Usaha")
+    st.text_input("Pangkat/Golongan *", key="pangkat", placeholder='Contoh: Penata Muda Tk. I (III/b), atau "0" jika non-ASN',
+                  help='Jika tidak ada (Non ASN), cukup isi "0".')
     st.text_input("Email *", key="email", placeholder="Contoh: ahmad.fauzi@gmail.com")
     st.number_input("Tahun lahir *", min_value=1931, max_value=2014, value=None, step=1, key="lahir", format="%d", help="Contoh: 1995")
-    st.selectbox("Asal provinsi *", PROVINSI, index=None, placeholder="Pilih provinsi", key="prov")
-    st.text_input("Asal kota/kabupaten", key="kota", placeholder="Contoh: Kota Mataram", help="Jika dari luar negeri, tulis: negara - kota")
+    st.selectbox("Kabupaten/Kota (Nusa Tenggara Barat)", KABKOTA, index=None, placeholder="--Pilih Kabupaten/Kota--", key="kabkota")
     st.multiselect("Sektor pekerjaan * (boleh lebih dari satu)", list(SEKTOR), key="sektor",
                    help="Sektor dibagi 6: public; public-private; private; private-third; third; public-third.")
     with st.expander("Penjelasan tiap sektor"):
         for k, v in SEKTOR.items():
             st.markdown(f"- **{k}**: {v}")
-    st.text_input("Pekerjaan/instansi", key="kerja", placeholder="Contoh: Staf Program, Yayasan Rumah Energi")
+    st.text_input("Instansi/tempat bekerja", key="kerja", placeholder="Contoh: Staf Program, Yayasan Rumah Energi")
     st.markdown("""
 **Cara kerja format IDP ini.** Format dirancang untuk rencana pengembangan diri **1 tahun**. Sebaiknya Anda sudah memiliki
 hasil evaluasi kompetensi. Monitoring IDP juga memerlukan *support system* (mentor, atasan, circle komunitas, atau rekan
@@ -497,15 +631,48 @@ with tabs[6]:
         st.divider()
 
 with tabs[7]:
+    st.subheader("5. Tujuan Utama & Rencana Aksi")
+    st.write("Bagian ini merangkum tujuan karier/pengembangan Anda dan langkah aksi beserta waktunya.")
+    st.info("**Contoh tujuan/target utama:**\n"
+            "- Menjadi kepala dinas/eselon II\n"
+            "- Menempati jabatan fungsional utama/madya/muda/pertama\n"
+            "- Menduduki jabatan direktur\n"
+            "- Memiliki/mengelola usaha wiraswasta\n"
+            "- Kenaikan pangkat ke IV/c, dll.")
+    st.text_area("Tujuan/Target utama *", key="tujuan", height=90, placeholder="Contoh: Menjadi kepala dinas/eselon II pada tahun 2030")
+    st.text_area("Kompetensi/keahlian yang diperlukan", key="kompet", height=90,
+                 placeholder="Contoh: Kompetensi manajerial, sosio kultural, teknis (analisis kebijakan), public speaking",
+                 help="Isikan kompetensi/keahlian yang diperlukan untuk mencapai tujuan. Boleh lebih dari satu.")
+    st.markdown("#### Rencana aksi dan waktu pelaksanaan")
+    st.info("**Contoh rencana aksi:** mengikuti pelatihan (sebut jenisnya); mengikuti seleksi terbuka; mencari ide bisnis; "
+            "riset pasar; menyiapkan lokasi bisnis; merekrut karyawan; membentuk jejaring; membuat yayasan, koperasi, dll.")
+    for i in range(N_AKSI):
+        st.markdown(f"**Rencana aksi {i + 1}** {'(wajib)' if i == 0 else '(opsional)'}")
+        st.text_area(f"Rencana aksi {i + 1}" + (" *" if i == 0 else ""), key=f"a{i}_r", height=70,
+                     placeholder=f"Contoh: {CONTOH_AKSI[i][0]}")
+        st.text_input(f"Waktu pelaksanaan {i + 1}" + (" *" if i == 0 else ""), key=f"a{i}_w",
+                      placeholder=f"Contoh: {CONTOH_AKSI[i][1]}")
+        st.divider()
+    st.markdown("#### Komitmen & pendampingan")
+    st.markdown("Dengan menandatangani formulir ini:\n1. Saya berkomitmen untuk menjalankan rencana aksi sesuai dengan linimasa.\n"
+                "2. Mentor berkomitmen mendampingi dan memfasilitasi pelaksanaan aksi serta melakukan evaluasi secara periodik.")
+    st.checkbox(KOMIT_TEXT + " *", key="komit")
+    st.text_input("Nama mentor *", key="mentor", placeholder="Contoh: Dr. Nama Mentor, M.Si.")
+
+with tabs[8]:
     st.subheader("Kirim IDP")
-    st.write(f"Jawaban akan dikirim ke **{cfg('EMAIL_TO', DEFAULT_RECIPIENT)}**.")
-    cc = st.checkbox("Kirim salinan ke email saya", value=True)
-    if not smtp_ready():
-        st.warning("Pengiriman email otomatis belum diaktifkan. Anda tetap bisa mengirim lewat aplikasi email "
+    to_email = cfg("EMAIL_TO", DEFAULT_RECIPIENT)
+    dests = (["Google Form"] if gform_ready() else []) + ([f"email {to_email}"] if smtp_ready() else [])
+    if dests:
+        st.write("Jawaban akan dikirim ke: **" + " dan ".join(dests) + "**.")
+    cc = st.checkbox("Kirim salinan ke email saya", value=True, disabled=not smtp_ready())
+    if not (gform_ready() or smtp_ready()):
+        st.warning("Pengiriman otomatis belum diaktifkan. Anda tetap bisa mengirim lewat aplikasi email "
                    "atau mengunduh hasilnya setelah menekan tombol di bawah.")
+    if not (gform_ready() and smtp_ready()):
         with st.expander("Untuk penyelenggara: cara mengaktifkan"):
             st.markdown(SETUP_HELP)
-    if st.button("Periksa & kirim ke email", type="primary"):
+    if st.button("Periksa & kirim", type="primary"):
         errors = validate()
         if errors:
             st.session_state.pop("_last", None)
@@ -515,24 +682,38 @@ with tabs[7]:
         else:
             summary, csv_text = build_summary(), build_csv()
             st.session_state["_last"] = (summary, csv_text)
-            if not smtp_ready():
-                st.info("Isian Anda sudah lengkap. Kirim lewat tombol **Buka aplikasi email** di bawah, "
-                        "lalu lampirkan file yang diunduh.")
-            else:
+            ok = False
+            if gform_ready():
+                try:
+                    with st.spinner("Mengirim ke Google Form..."):
+                        n = submit_gform(gform_payload())
+                    st.success(f"Jawaban masuk ke Google Form ({n} isian terkirim).")
+                    ok = True
+                except Exception as ex:
+                    st.error(f"Gagal mengirim ke Google Form: {ex}")
+            if smtp_ready():
                 try:
                     with st.spinner("Mengirim email..."):
                         send_email(summary, csv_text, cc)
-                    st.success("IDP berhasil dikirim.")
+                    st.success("IDP juga terkirim lewat email.")
+                    ok = True
                 except smtplib.SMTPAuthenticationError:
                     st.error("Login email pengirim ditolak. Pastikan memakai App Password Gmail (bukan password "
                              "biasa) dan verifikasi 2 langkah aktif.")
-                    st.warning("Gunakan tombol di bawah untuk mengirim manual.")
                 except Exception as ex:
                     st.error(f"Email gagal terkirim: {ex}")
-                    st.warning("Gunakan tombol di bawah untuk mengirim manual.")
+            if not ok:
+                st.warning("Belum ada pengiriman yang berhasil. Gunakan tombol di bawah untuk mengirim manual.")
     if "_last" in st.session_state:
         summary, csv_text = st.session_state["_last"]
-        st.link_button("Buka aplikasi email (alternatif)", mailto_link(summary))
+        L = compose_links(summary)
+        st.markdown("**Kirim manual lewat email** (isi email terisi otomatis, tinggal tekan Kirim):")
+        e1, e2, e3 = st.columns(3)
+        e1.link_button("Gmail (browser)", L["gmail"], use_container_width=True)
+        e2.link_button("Outlook (browser)", L["outlook"], use_container_width=True)
+        e3.link_button("Aplikasi email", L["mailto"], use_container_width=True,
+                       help="Hanya berfungsi jika komputer punya aplikasi email bawaan (Outlook/Mail).")
+        st.caption(f"Tujuan: {L['to']} | Subjek: {L['subject']}. Lampirkan file .txt/.csv dari tombol unduh di bawah.")
         c1, c2 = st.columns(2)
         c1.download_button("Unduh ringkasan (.txt)", summary, file_name="IDP2026.txt", mime="text/plain")
         c2.download_button("Unduh data (.csv)", csv_text, file_name="IDP2026.csv", mime="text/csv")
