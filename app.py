@@ -185,12 +185,64 @@ def fmt_date(d):
     return d.strftime("%d-%m-%Y") if isinstance(d, (date, datetime)) else "-"
 
 
+EX_PERAN = {
+    "I0": ["Membina 5 calon pengurus lewat mentoring bulanan; 2 di antaranya kini memimpin divisi.", "Membimbing staf baru dengan program onboarding 3 bulan dan evaluasi tiap bulan.", "Belum terstruktur: baru memberi arahan sesekali pada 2 anggota tim yang membutuhkan."],
+    "I1": ["Anggota naik dari 30 menjadi 55 orang dan 10 di antaranya sudah mengikuti pelatihan dasar.", "Kompetensi tim meningkat; 3 anggota lulus sertifikasi dan 2 naik jabatan.", "Jumlah anggota relatif tetap, namun mulai ada upaya rekrutmen lewat media sosial."],
+    "I2": ["Menyusun proposal dukungan dana ke 3 mitra dan membuka unit layanan berbayar.", "Membantu bendahara menyusun anggaran tahunan dan menekan biaya operasional 10%.", "Belum terlibat langsung; baru memberi masukan saat rapat keuangan."],
+    "I3": ["Menambah sumber dana dari donasi rutin, kerja sama program, dan jasa pelatihan.", "Mengajukan hibah ke 2 lembaga pemberi dana selain sumber utama.", "Masih bergantung pada satu sumber dana; sedang menyusun rencana diversifikasi."],
+    "I4": ["Memetakan aset dan SDM yang belum terpakai, lalu memanfaatkan ruang kantor untuk kelas pelatihan.", "Menyusun jadwal kerja bersama agar beban tiap anggota lebih seimbang.", "Pemanfaatan sumberdaya masih sebagian; beberapa peralatan belum dipakai optimal."],
+    "I5": ["Menjalin kerja sama dengan 2 kampus dan 1 dinas untuk program magang bersama.", "Aktif di forum asosiasi dan memperkenalkan lembaga ke 5 calon mitra baru.", "Punya kenalan di beberapa instansi, namun belum dimanfaatkan untuk program bersama."],
+    "U0": ["Mengisi kajian mingguan di lingkungan RT/kampus tentang akhlak dan kejujuran dalam bekerja.", "Mengajak rekan kerja membiasakan shalat berjamaah dan budaya jujur di kantor.", "Menerapkan nilai kebaikan di keluarga dan pribadi; belum menjangkau lingkungan lebih luas."],
+    "U1": ["Menulis 2 artikel per bulan di Instagram/blog komunitas dengan jangkauan sekitar 1.500 pembaca.", "Mengelola kanal dakwah singkat di media sosial dengan konten mingguan.", "Sesekali membagikan tulisan Islami di grup WhatsApp dan media sosial pribadi."],
+    "U2": ["Menjadi panitia pesantren kilat dan mengajar kelas literasi Al-Qur'an untuk 20 anak.", "Menjadi relawan pengajar TPA di masjid dekat rumah setiap akhir pekan.", "Membantu kegiatan pendidikan/budaya Islami saat diminta panitia."],
+    "U3": ["Membantu masjid/lembaga zakat membuat sistem pendataan donasi digital.", "Menyusun laporan keuangan masjid yang transparan dan dipublikasikan tiap bulan.", "Memberi masukan manajemen kepada pengurus lembaga umat secara informal."],
+    "U4": ["Menyusun surat dukungan warga untuk perbaikan fasilitas ibadah di tingkat kelurahan.", "Ikut audiensi dengan pemerintah daerah terkait kebutuhan pendidikan pesantren.", "Sesekali ikut mendukung petisi atau gerakan advokasi umat."],
+    "U5": ["Menginisiasi forum silaturahmi antar komunitas pemuda masjid satu kecamatan.", "Menghubungkan 3 organisasi Islam lokal dalam kegiatan bakti sosial bersama.", "Belum berperan; baru menjadi anggota komunitas tanpa kegiatan lintas kelompok."],
+    "N0": ["Ikut menyusun standar pelatihan SDM lokal untuk mendukung industri daerah.", "Mendukung program prioritas daerah sesuai tugas pokok jabatan.", "Berkontribusi sebatas tugas formal di instansi."],
+    "N1": ["Mendampingi 15 pelaku UMKM menyusun pembukuan sederhana dan memasarkan produk secara online.", "Membuka lapangan kerja bagi 5 pemuda lewat usaha rintisan.", "Mendukung program ekonomi daerah dengan memberi pelatihan singkat."],
+    "N2": ["Ikut menyusun SOP layanan satu pintu dan survei kepuasan masyarakat.", "Menjadi anggota tim reformasi birokrasi unit kerja.", "Berkontribusi sesuai tugas pokok pada perbaikan layanan di unit sendiri."],
+    "N3": ["Mengusulkan aplikasi antrean online untuk layanan puskesmas/kantor desa.", "Menerapkan pelaporan digital yang memangkas waktu layanan dari 3 hari menjadi 1 hari.", "Menyampaikan ide perbaikan layanan saat rapat evaluasi."],
+    "N4": ["Aktif hadir di rapat bulanan asosiasi profesi dan menjadi panitia seminar tahunan.", "Menjadi pengurus bidang kajian di organisasi profesi tingkat provinsi.", "Terdaftar sebagai anggota dan mengikuti kegiatan rutin."],
+    "N5": ["Menyampaikan masukan kebijakan dalam forum konsultasi publik tingkat provinsi.", "Menulis policy brief tentang isu daerah untuk diserahkan ke pemangku kebijakan.", "Terlibat minimal; baru ikut diskusi isu kebangsaan di komunitas."],
+}
+EX = {
+    "jabatan": ["Kepala Seksi Perencanaan dan Evaluasi", "Staf Program dan Kemitraan", "Pemilik/Pengelola Usaha (Wirausaha)"],
+    "pangkat": ["Penata Muda Tk. I (III/b)", "Pembina (IV/a)", "0 (non-ASN)"],
+    "kerja": ["Dinas Pendidikan dan Kebudayaan Provinsi NTB", "Yayasan Rumah Energi", "Usaha mandiri milik sendiri"],
+    "gap_t": ["Manajemen SDM", "Pengolahan data dengan Tableau", "Public Speaking"],
+    "gap_w": ["agar bisa meningkatkan kapasitas tim dan menyiapkan suksesi pengurus", "agar bisa mengembangkan kapasitas data analysis lembaga", "agar lebih percaya diri tampil di forum dan memperbanyak portofolio sebagai narasumber"],
+    "lalu": ["1. Manajemen proyek\n2. Analisis data dengan Excel\n3. Penulisan laporan program", "1. Kepemimpinan tim\n2. Public speaking\n3. Penyusunan proposal pendanaan", "1. Pengelolaan keuangan lembaga\n2. Pemasaran digital\n3. Fasilitasi pelatihan"],
+    "plan_t": ["Manajemen SDM", "Pengolahan data dengan Tableau", "Manajemen keuangan dan legal lembaga"],
+    "plan_i": ["Suksesi 2 posisi strategis berjalan tanpa hambatan", "Dashboard data feedback dan demografi peserta pelatihan selesai dan dipakai rutin", "Legalitas lembaga lengkap dan laporan keuangan tahunan diaudit"],
+    "opt_r": ["Menumbuhkan ekselensi di berbagai instansi di Indonesia", "Mengembangkan tim yang tersertifikasi untuk kebutuhan konsultasi", "Membangun komunitas pengembangan pemuda di kota/kabupaten saya"],
+    "opt_i": ["1. Membantu 2 lembaga mengembangkan tim kerja\n2. Kolaborasi program dengan setiap lembaga mitra yang dibentuk", "1. Tim memiliki 4 jenis sertifikasi\n2. Ada 2 mitra kolaborasi baru dengan kebutuhan ekspert tersertifikasi", "1. Ada akun media sosial komunitas\n2. Anggota lebih dari 100 orang\n3. Kegiatan 1x per bulan"],
+}
+
+
+def field(kind, key, label, examples, placeholder="", height=80, help=None):
+    """Kolom isian + pilihan 3 contoh. Memilih contoh mengisi kolom; isi tetap bisa diubah/ditulis sendiri."""
+    sk = f"{key}__ex"
+
+    def _apply():
+        v = st.session_state.get(sk)
+        if v:
+            st.session_state[key] = v
+            st.session_state[sk] = None
+
+    if kind == "area":
+        st.text_area(label, key=key, height=height, placeholder=placeholder, help=help)
+    else:
+        st.text_input(label, key=key, placeholder=placeholder, help=help)
+    st.selectbox("Contoh isian", examples, index=None, key=sk, on_change=_apply, label_visibility="collapsed",
+                 placeholder="💡 Pilih salah satu dari 3 contoh jika cocok, atau tulis sendiri dengan bahasa Anda di atas")
+
+
 def scale_widget(code, i, title, opts, contoh):
     st.markdown(f"**{i + 1}. {title}**")
     st.radio("Dampak peran", [1, 2, 3, 4, 5], index=None, key=f"{code}{i}",
              format_func=lambda v: f"{v}. {opts[v - 1]}", label_visibility="collapsed")
-    st.text_area("Deskripsikan peran konkret yang telah Anda lakukan", key=f"{code}{i}_d", height=80,
-                 placeholder=f"Contoh: {contoh}", help="Wajib diisi bila dampak yang dipilih 4 atau 5.")
+    field("area", f"{code}{i}_d", "Deskripsikan peran konkret yang telah Anda lakukan", EX_PERAN[f"{code}{i}"],
+          placeholder=f"Contoh: {contoh}", help="Wajib diisi bila dampak yang dipilih 4 atau 5.")
     st.divider()
 
 
@@ -485,6 +537,10 @@ h2, h3 { color: #0f6b68; font-weight: 800 !important; }
 .stButton > button[kind="primary"] { background: linear-gradient(135deg, #0f6b68, #2f8f94); border: 0; color: #fff;
   box-shadow: 0 6px 18px rgba(15,107,104,.4); }
 .stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(15,107,104,.35); }
+.st-key-lalu_card { background: linear-gradient(135deg, #fff8e1 0%, #e6f6f4 100%); border: 2px dashed #f2c14e !important;
+  border-radius: 20px !important; padding: 8px 14px 4px; box-shadow: 0 8px 22px rgba(242,193,78,.25); }
+.st-key-lalu_card h3 { color: #b7791f; margin-top: 0; }
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div { background: #f3faf9; border-style: dashed; }
 div[data-testid="stAlert"], div[data-testid="stExpander"] { border-radius: 14px; }
 div[data-testid="stRadio"] label { border-radius: 10px; }
 div[data-baseweb="input"], div[data-baseweb="select"] > div, div[data-baseweb="textarea"] { border-radius: 10px !important; }
@@ -588,13 +644,17 @@ with tabs[4]:
                "memperbanyak portfolio sebagai narasumber.")
     for i in range(N_ROWS):
         st.markdown(f"**Gap {i + 1}** {'(wajib)' if i < MIN_ROWS else '(opsional)'}")
-        st.text_input("Judul kompetensi", key=f"g{i}_t", placeholder=f"Contoh: {CONTOH_GAP[i][0]}")
+        field("input", f"g{i}_t", "Judul kompetensi", EX["gap_t"], placeholder=f"Contoh: {CONTOH_GAP[i][0]}")
         st.selectbox("Ukuran peningkatan", UKURAN, index=None, key=f"g{i}_u", placeholder="Pilih ukuran keberhasilan")
-        st.text_area("Factor Why", key=f"g{i}_w", height=70, placeholder=f"Contoh: {CONTOH_GAP[i][1]}")
+        field("area", f"g{i}_w", "Factor Why", EX["gap_w"], height=70, placeholder=f"Contoh: {CONTOH_GAP[i][1]}")
         st.divider()
-    st.text_area("Kompetensi yang telah Anda kembangkan 1 tahun ke belakang (maksimal 5) *", key="lalu",
-                 placeholder="Contoh:\n1. Manajemen proyek\n2. Analisis data dengan Excel\n3. Penulisan laporan program",
-                 help="Tulis satu per baris.")
+    st.markdown("&nbsp;")
+    with st.container(border=True, key="lalu_card"):
+        st.markdown("### 📈 Refleksi capaian 1 tahun terakhir")
+        st.caption("Bagian penutup tab ini: catat kompetensi yang sudah Anda kembangkan, maksimal 5, satu per baris.")
+        field("area", "lalu", "Kompetensi yang telah Anda kembangkan 1 tahun ke belakang (maksimal 5) *", EX["lalu"], height=130,
+              placeholder="Contoh:\n1. Manajemen proyek\n2. Analisis data dengan Excel\n3. Penulisan laporan program",
+              help="Tulis satu per baris.")
 
 with tabs[5]:
     st.subheader("3. Rencana Pengembangan Kompetensi")
@@ -605,10 +665,10 @@ with tabs[5]:
                "orang tanpa grogi.")
     for i in range(N_ROWS):
         st.markdown(f"**Kompetensi {i + 1}** {'(wajib)' if i < MIN_ROWS else '(opsional)'}")
-        st.text_input("Judul kompetensi", key=f"p{i}_t", placeholder=f"Contoh: {CONTOH_RENCANA[i][0]}")
+        field("input", f"p{i}_t", "Judul kompetensi", EX["plan_t"], placeholder=f"Contoh: {CONTOH_RENCANA[i][0]}")
         st.selectbox("Sarana pengembangan", SARANA, index=None, key=f"p{i}_s", placeholder="Pilih sarana")
-        st.text_area("Indikator kompetensi (target 1 tahun)", key=f"p{i}_i", height=70,
-                     placeholder=f"Contoh: {CONTOH_RENCANA[i][1]}")
+        field("area", f"p{i}_i", "Indikator kompetensi (target 1 tahun)", EX["plan_i"], height=70,
+              placeholder=f"Contoh: {CONTOH_RENCANA[i][1]}")
         st.divider()
 
 with tabs[6]:
@@ -623,9 +683,9 @@ with tabs[6]:
                "orang, 3) kegiatan 1x per bulan | 23-10-2026.")
     for i in range(N_ROWS):
         st.markdown(f"**Rencana No {i + 1}** {'(wajib)' if i < MIN_ROWS else '(opsional)'}")
-        st.text_area("Rencana peran", key=f"o{i}_r", height=70, placeholder=f"Contoh: {CONTOH_OPT[i][0]}")
-        st.text_area("Indikator capaian (bernomor, terukur)", key=f"o{i}_i", height=110,
-                     placeholder=f"Contoh:\n{CONTOH_OPT[i][1]}")
+        field("area", f"o{i}_r", "Rencana peran", EX["opt_r"], height=70, placeholder=f"Contoh: {CONTOH_OPT[i][0]}")
+        field("area", f"o{i}_i", "Indikator capaian (bernomor, terukur)", EX["opt_i"], height=110,
+              placeholder=f"Contoh:\n{CONTOH_OPT[i][1]}")
         st.date_input("Target realisasi", value=None, key=f"o{i}_d", format="DD/MM/YYYY",
                       help="Pilih tanggal batas indikator tercapai, mis. 31-12-2026.")
         st.divider()
